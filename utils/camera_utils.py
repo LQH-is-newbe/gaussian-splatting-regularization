@@ -12,7 +12,7 @@
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
-from utils.graphics_utils import fov2focal
+from utils.graphics_utils import fov2focal, focal2fov
 
 WARNED = False
 
@@ -51,13 +51,93 @@ def loadCam(args, id, cam_info, resolution_scale):
                   image=gt_image, gt_alpha_mask=loaded_mask,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 
-def cameraList_from_camInfos(cam_infos, resolution_scale, args):
-    camera_list = []
+# ref: regnerf/internal/datasets.py
+def poses_avg(poses):
+  """New pose using average position, z-axis, and up vector of input poses."""
+  position = poses[:, :3, 3].mean(0)
+  z_axis = poses[:, :3, 2].mean(0)
+  up = poses[:, :3, 1].mean(0)
+  cam2world = viewmatrix(z_axis, up, position)
+  return cam2world
 
-    for id, c in enumerate(cam_infos):
-        camera_list.append(loadCam(args, id, c, resolution_scale))
+# ref: regnerf/internal/datasets.py
+def viewmatrix(lookdir, up, position, subtract_position=False):
+  """Construct lookat view matrix."""
+  vec2 = normalize((lookdir - position) if subtract_position else lookdir)
+  vec0 = normalize(np.cross(up, vec2))
+  vec1 = normalize(np.cross(vec2, vec0))
+  m = np.stack([vec0, vec1, vec2, position], axis=1)
+  return m
 
-    return camera_list
+# ref: regnerf/internal/datasets.py
+def normalize(x):
+  """Normalization helper function."""
+  return x / np.linalg.norm(x)
+
+# ref: regnerf/internal/datasets.py
+def focus_pt_fn(poses):
+  """Calculate nearest point to all focal axes in poses."""
+  directions, origins = poses[:, :3, 2:3], poses[:, :3, 3:4]
+  m = np.eye(3) - directions * np.transpose(directions, [0, 2, 1])
+  mt_m = np.transpose(m, [0, 2, 1]) @ m
+  focus_pt = np.linalg.inv(mt_m.mean(0)) @ (mt_m @ origins).mean(0)[:, 0]
+  return focus_pt
+
+def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTrain=True):
+    if isTrain and unobserved:
+        camera_list = []
+        poses = []
+
+        for id, c in enumerate(cam_infos):
+            tmp_cam = loadCam(args, id, c, resolution_scale)
+            poses.append(tmp_cam.world_view_transform)
+            camera_list.append(tmp_cam)
+        
+        # ref: regnerf/internal/datasets.py
+        # here we are precalculating the values needed when generating random poses
+        positions = poses[:, :3, 3]
+        radii = np.percentile(np.abs(positions), 100, 0)
+        radii = np.concatenate([radii, [1.]])
+        cam2world = poses_avg(poses)
+        up = poses[:, :3, 1].mean(0)
+        z_axis = focus_pt_fn(poses)
+        unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, args.ps, args.data_device)
+
+        return camera_list, unobserved_list
+    else:
+        camera_list = []
+        
+        for id, c in enumerate(cam_infos):
+            camera_list.append(loadCam(args, id, c, resolution_scale))
+
+        return camera_list, []
+
+def generate_cams(n_random_cams, radii, cam2world, up, z_axis, ps, device):
+    cams = []
+
+    for _ in range(n_random_cams):
+        # generate T (ref: regnerf/internal/datasets.py)
+        t = radii * np.concatenate([2 * (np.random.rand(3) - 0.5), [1,]])
+        position = cam2world @ t
+        z_axis_i = z_axis + np.random.randn(*z_axis.shape) * 0.125
+        # generate R (here homogeneous representation not sure)
+        r = viewmatrix(z_axis_i, up, position, True)[:3, :3].transpose() / position[3]
+        t = position[:3] / position[3]
+
+        # get focus
+        f = np.linalg.norm(position - z_axis_i)
+        # generate FovX
+        fovX = focal2fov(f, ps)
+        # generate FovY
+        fovY = fovX
+        # two ids set to None and image_name set to empty for generated unobserved camera views
+        cams.append(Camera(colmap_id=None, R=r, T=t, 
+                            FoVx=fovX, FoVy=fovY, 
+                            image=None, gt_alpha_mask=None,
+                            image_name='', uid=None, 
+                            width=ps, height=ps, 
+                            data_device=device, isUnobserved=True))
+    return cams
 
 def camera_to_JSON(id, camera : Camera):
     Rt = np.zeros((4, 4))
