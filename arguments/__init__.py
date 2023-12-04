@@ -54,6 +54,8 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
+        self.n_random_cams = 10000
+        self.ps = 8
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -87,6 +89,7 @@ class OptimizationParams(ParamGroup):
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
         self.random_background = False
+        self.lambda_ds = 10e-6
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

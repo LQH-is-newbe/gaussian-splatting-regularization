@@ -45,6 +45,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
 
     viewpoint_stack = None
+    unobserved_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -77,20 +78,33 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
+        # Pick a random unobserved view
+        if not unobserved_stack:
+            unobserved_stack = scene.getRandomCameras().copy()
+        unobserved_camera = unobserved_stack.pop(randint(0, len(unobserved_stack)-1))
+
         # Render
+        # TODO: fix for depth calc
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
-        image, e_depths, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["d_depths"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
+        unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
+        e_depths = unobserved_render_pkg["e_depths"]
 
         # Loss
+        # usual loss in 3d gs
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
-        geometry_loss(e_depths)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+        # geometry regulation: depth smoothness loss
+        L_dp = geometry_loss(e_depths)
+        # final loss
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + opt.lambda_ds * L_dp
         loss.backward()
 
         iter_end.record()
