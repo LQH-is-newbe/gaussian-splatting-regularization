@@ -89,7 +89,17 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
         poses = []
         width, height = 0, 0
 
-        for id, c in enumerate(cam_infos):
+        ids = np.random.choice(len(cam_infos), size=9, replace=False)
+
+        # for id, c in enumerate(cam_infos):
+        #     tmp_cam = loadCam(args, id, c, resolution_scale)
+        #     height = tmp_cam.image_height
+        #     width = tmp_cam.image_width
+        #     poses.append(tmp_cam.world_view_transform)
+        #     camera_list.append(tmp_cam)
+
+        for id in ids:
+            c = cam_infos[id]
             tmp_cam = loadCam(args, id, c, resolution_scale)
             height = tmp_cam.image_height
             width = tmp_cam.image_width
