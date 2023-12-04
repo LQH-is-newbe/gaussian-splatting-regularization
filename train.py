@@ -28,11 +28,11 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, RegOn):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, gaussians, unobserved=RegOn)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -78,13 +78,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
-        # Pick a random unobserved view
-        if not unobserved_stack:
-            unobserved_stack = scene.getRandomCameras().copy()
-        unobserved_camera = unobserved_stack.pop(randint(0, len(unobserved_stack)-1))
+        if RegOn:
+            # Pick a random unobserved view
+            if not unobserved_stack:
+                unobserved_stack = scene.getRandomCameras().copy()
+            unobserved_camera = unobserved_stack.pop(randint(0, len(unobserved_stack)-1))
 
         # Render
-        # TODO: fix for depth calc
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
@@ -93,18 +93,22 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
-        e_depths = unobserved_render_pkg["e_depths"]
+        if RegOn:
+            unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
+            e_depths = unobserved_render_pkg["e_depths"]
 
         # Loss
         # usual loss in 3d gs
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        # geometry regulation: depth smoothness loss
-        L_dp = geometry_loss(e_depths)
-        # final loss
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + opt.lambda_ds * L_dp
+        if RegOn:
+            # geometry regulation: depth smoothness loss
+            L_dp = geometry_loss(e_depths)
+            # final loss
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + opt.lambda_ds * L_dp
+        else:
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
 
         iter_end.record()
@@ -229,9 +233,10 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
+    RegOn = True
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)
 
     # All done
     print("\nTraining complete.")
