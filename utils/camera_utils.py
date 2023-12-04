@@ -87,9 +87,12 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
     if isTrain and unobserved:
         camera_list = []
         poses = []
+        width, height = 0, 0
 
         for id, c in enumerate(cam_infos):
             tmp_cam = loadCam(args, id, c, resolution_scale)
+            height = tmp_cam.image_height
+            width = tmp_cam.image_width
             poses.append(tmp_cam.world_view_transform)
             camera_list.append(tmp_cam)
         
@@ -101,7 +104,7 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
         cam2world = poses_avg(poses)
         up = poses[:, :3, 1].mean(0)
         z_axis = focus_pt_fn(poses)
-        unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, args.ps, args.data_device)
+        unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, height, width, args.data_device)
 
         return camera_list, unobserved_list
     else:
@@ -112,7 +115,7 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
 
         return camera_list, []
 
-def generate_cams(n_random_cams, radii, cam2world, up, z_axis, ps, device):
+def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, device):
     cams = []
 
     for _ in range(n_random_cams):
@@ -127,15 +130,15 @@ def generate_cams(n_random_cams, radii, cam2world, up, z_axis, ps, device):
         # get focus
         f = np.linalg.norm(position - z_axis_i)
         # generate FovX
-        fovX = focal2fov(f, ps)
+        fovX = focal2fov(f, width)
         # generate FovY
-        fovY = fovX
+        fovY = focal2fov(f, height)
         # two ids set to None and image_name set to empty for generated unobserved camera views
         cams.append(Camera(colmap_id=None, R=r, T=t, 
                             FoVx=fovX, FoVy=fovY, 
                             image=None, gt_alpha_mask=None,
                             image_name='', uid=None, 
-                            width=ps, height=ps, 
+                            width=width, height=height, 
                             data_device=device, isUnobserved=True))
     return cams
 
