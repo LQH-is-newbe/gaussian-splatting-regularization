@@ -154,6 +154,7 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
+	const bool random_camera,
 	const float* orig_points,
 	const glm::vec3* scales,
 	const float scale_modifier,
@@ -238,7 +239,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
-	if (colors_precomp == nullptr)
+	if (!random_camera && colors_precomp == nullptr)
 	{
 		glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
 		rgb[idx * C + 0] = result.x;
@@ -261,16 +262,19 @@ __global__ void preprocessCUDA(int P, int D, int M,
 template <uint32_t CHANNELS>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
+	const bool random_camera,
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
+	const float* __restrict__ depths,
 	const float4* __restrict__ conic_opacity,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	float* __restrict__ out_color)
+	float* __restrict__ out_color,
+	float* __restrict__ out_e_depth)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -301,6 +305,7 @@ renderCUDA(
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
+	float e_depth = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -350,9 +355,17 @@ renderCUDA(
 				continue;
 			}
 
-			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+			if (!random_camera)
+			{
+				// Eq. (3) from 3D Gaussian splatting paper.
+				for (int ch = 0; ch < CHANNELS; ch++)
+					C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+			}
+			else
+			{
+				// Calculate expected depth
+				e_depth += depths[collected_id[j]] * alpha * T;
+			}
 
 			T = test_T;
 
@@ -368,38 +381,53 @@ renderCUDA(
 	{
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
-		for (int ch = 0; ch < CHANNELS; ch++)
-			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+
+		if (!random_camera)
+		{
+			for (int ch = 0; ch < CHANNELS; ch++)
+				out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+		}
+		else
+		{
+			out_e_depth[pix_id] = e_depth + T * 200.0;
+		}
 	}
 }
 
 void FORWARD::render(
 	const dim3 grid, dim3 block,
+	const bool random_camera,
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
 	const float2* means2D,
 	const float* colors,
+	const float* depths,
 	const float4* conic_opacity,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
-	float* out_color)
+	float* out_color,
+	float* out_e_depth)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+		random_camera,
 		ranges,
 		point_list,
 		W, H,
 		means2D,
 		colors,
+		depths,
 		conic_opacity,
 		final_T,
 		n_contrib,
 		bg_color,
-		out_color);
+		out_color,
+		out_e_depth);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
+	const bool random_camera,
 	const float* means3D,
 	const glm::vec3* scales,
 	const float scale_modifier,
@@ -427,6 +455,7 @@ void FORWARD::preprocess(int P, int D, int M,
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
+		random_camera,
 		means3D,
 		scales,
 		scale_modifier,

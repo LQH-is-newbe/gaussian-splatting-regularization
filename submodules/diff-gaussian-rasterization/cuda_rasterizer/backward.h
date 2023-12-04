@@ -22,6 +22,7 @@ namespace BACKWARD
 {
 	void render(
 		const dim3 grid, dim3 block,
+		const bool random_camera,
 		const uint2* ranges,
 		const uint32_t* point_list,
 		int W, int H,
@@ -29,16 +30,20 @@ namespace BACKWARD
 		const float2* means2D,
 		const float4* conic_opacity,
 		const float* colors,
+		const float* depths,
 		const float* final_Ts,
 		const uint32_t* n_contrib,
 		const float* dL_dpixels,
+		const float* dL_de_depths,
 		float3* dL_dmean2D,
 		float4* dL_dconic2D,
 		float* dL_dopacity,
-		float* dL_dcolors);
+		float* dL_dcolors,
+		float* dL_ddepths);
 
 	void preprocess(
 		int P, int D, int M,
+		const bool random_camera,
 		const float3* means,
 		const int* radii,
 		const float* shs,
@@ -59,7 +64,8 @@ namespace BACKWARD
 		float* dL_dcov3D,
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
-		glm::vec4* dL_drot);
+		glm::vec4* dL_drot,
+		float* dL_ddepths);
 }
 
 #endif

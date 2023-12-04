@@ -346,6 +346,7 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 template<int C>
 __global__ void preprocessCUDA(
 	int P, int D, int M,
+	const bool random_camera,
 	const float3* means,
 	const int* radii,
 	const float* shs,
@@ -353,6 +354,7 @@ __global__ void preprocessCUDA(
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
+	const float* view,
 	const float* proj,
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
@@ -361,7 +363,8 @@ __global__ void preprocessCUDA(
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	glm::vec4* dL_drot,
+	float* dL_ddepths)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
@@ -382,12 +385,21 @@ __global__ void preprocessCUDA(
 	dL_dmean.y = (proj[4] * m_w - proj[7] * mul1) * dL_dmean2D[idx].x + (proj[5] * m_w - proj[7] * mul2) * dL_dmean2D[idx].y;
 	dL_dmean.z = (proj[8] * m_w - proj[11] * mul1) * dL_dmean2D[idx].x + (proj[9] * m_w - proj[11] * mul2) * dL_dmean2D[idx].y;
 
+	if (random_camera)
+	{
+		// Compute loss gradient w.r.t. 3D means due to gradients of depth
+		float dL_ddepth = dL_ddepths[idx];
+		dL_dmean.x += view[2] * dL_ddepth;
+		dL_dmean.y += view[6] * dL_ddepth;
+		dL_dmean.z += view[10] * dL_ddepth;
+	}
+
 	// That's the second part of the mean gradient. Previous computation
 	// of cov2D and following SH conversion also affects it.
 	dL_dmeans[idx] += dL_dmean;
 
 	// Compute gradient updates due to computing colors from SHs
-	if (shs)
+	if (!random_camera && shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
 
 	// Compute gradient updates due to computing covariance from scale/rotation
@@ -399,6 +411,7 @@ __global__ void preprocessCUDA(
 template <uint32_t C>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
+	const bool random_camera,
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
@@ -406,13 +419,16 @@ renderCUDA(
 	const float2* __restrict__ points_xy_image,
 	const float4* __restrict__ conic_opacity,
 	const float* __restrict__ colors,
+	const float* __restrict__ depths,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels,
+	const float* __restrict__ dL_de_depths,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
-	float* __restrict__ dL_dcolors)
+	float* __restrict__ dL_dcolors,
+	float* __restrict__ dL_ddepths)
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
@@ -447,13 +463,16 @@ renderCUDA(
 	const int last_contributor = inside ? n_contrib[pix_id] : 0;
 
 	float accum_rec[C] = { 0 };
+	float accum_rec_depth = 0;
 	float dL_dpixel[C];
+	float dL_de_depth = dL_de_depths[pix_id];
 	if (inside)
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
 
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
+	float last_depth = 0;
 
 	// Gradient of pixel coordinate w.r.t. normalized 
 	// screen-space viewport corrdinates (-1 to 1)
@@ -503,35 +522,58 @@ renderCUDA(
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
 
-			// Propagate gradients to per-Gaussian colors and keep
-			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
-			// pair).
 			float dL_dalpha = 0.0f;
 			const int global_id = collected_id[j];
-			for (int ch = 0; ch < C; ch++)
-			{
-				const float c = collected_colors[ch * BLOCK_SIZE + j];
-				// Update last color (to be used in the next iteration)
-				accum_rec[ch] = last_alpha * last_color[ch] + (1.f - last_alpha) * accum_rec[ch];
-				last_color[ch] = c;
 
-				const float dL_dchannel = dL_dpixel[ch];
-				dL_dalpha += (c - accum_rec[ch]) * dL_dchannel;
-				// Update the gradients w.r.t. color of the Gaussian. 
-				// Atomic, since this pixel is just one of potentially
-				// many that were affected by this Gaussian.
-				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
+			if (!random_camera)
+			{
+				// Propagate gradients to per-Gaussian colors and keep
+				// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
+				// pair).
+				for (int ch = 0; ch < C; ch++)
+				{
+					const float c = collected_colors[ch * BLOCK_SIZE + j];
+					// Update last color (to be used in the next iteration)
+					accum_rec[ch] = last_alpha * last_color[ch] + (1.f - last_alpha) * accum_rec[ch];
+					last_color[ch] = c;
+
+					const float dL_dchannel = dL_dpixel[ch];
+					dL_dalpha += (c - accum_rec[ch]) * dL_dchannel;
+					// Update the gradients w.r.t. color of the Gaussian. 
+					// Atomic, since this pixel is just one of potentially
+					// many that were affected by this Gaussian.
+					atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
+				}
 			}
+			else
+			{
+				// Propagate gradients to per-Gaussian depth and keep gradients w.r.t. alpha
+				const float depth = depths[j];
+				accum_rec_depth = last_alpha * last_depth + (1.f - last_alpha) * accum_rec_depth;
+				last_depth = depth;
+				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
+
+				const float de_depth_ddepth = alpha * T;
+				atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth);
+			}
+
 			dL_dalpha *= T;
 			// Update last alpha (to be used in the next iteration)
 			last_alpha = alpha;
 
-			// Account for fact that alpha also influences how much of
-			// the background color is added if nothing left to blend
-			float bg_dot_dpixel = 0;
-			for (int i = 0; i < C; i++)
-				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
-			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+			if (!random_camera)
+			{
+				// Account for fact that alpha also influences how much of
+				// the background color is added if nothing left to blend
+				float bg_dot_dpixel = 0;
+				for (int i = 0; i < C; i++)
+					bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
+				dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+			}
+			else
+			{
+				dL_dalpha += (-T_final / (1.f - alpha)) * 200.0 * dL_de_depth;
+			}
 
 
 			// Helpful reusable temporary variables
@@ -558,6 +600,7 @@ renderCUDA(
 
 void BACKWARD::preprocess(
 	int P, int D, int M,
+	const bool random_camera,
 	const float3* means3D,
 	const int* radii,
 	const float* shs,
@@ -578,7 +621,8 @@ void BACKWARD::preprocess(
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	glm::vec4* dL_drot,
+	float* dL_ddepths)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -603,6 +647,7 @@ void BACKWARD::preprocess(
 	// matrix gradients to scale and rotation.
 	preprocessCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
 		P, D, M,
+		random_camera,
 		(float3*)means3D,
 		radii,
 		shs,
@@ -610,6 +655,7 @@ void BACKWARD::preprocess(
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
+		viewmatrix,
 		projmatrix,
 		campos,
 		(float3*)dL_dmean2D,
@@ -618,11 +664,13 @@ void BACKWARD::preprocess(
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,
-		dL_drot);
+		dL_drot,
+		dL_ddepths);
 }
 
 void BACKWARD::render(
 	const dim3 grid, const dim3 block,
+	const bool random_camera,
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
@@ -630,15 +678,19 @@ void BACKWARD::render(
 	const float2* means2D,
 	const float4* conic_opacity,
 	const float* colors,
+	const float* depths,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
+	const float* dL_de_depths,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
-	float* dL_dcolors)
+	float* dL_dcolors,
+	float* dL_ddepths)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
+		random_camera,
 		ranges,
 		point_list,
 		W, H,
@@ -646,12 +698,15 @@ void BACKWARD::render(
 		means2D,
 		conic_opacity,
 		colors,
+		depths,
 		final_Ts,
 		n_contrib,
 		dL_dpixels,
+		dL_de_depths,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,
-		dL_dcolors
+		dL_dcolors,
+		dL_ddepths
 		);
 }
