@@ -103,12 +103,12 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
             tmp_cam = loadCam(args, id, c, resolution_scale)
             height = tmp_cam.image_height
             width = tmp_cam.image_width
-            poses.append(tmp_cam.world_view_transform)
+            poses.append(tmp_cam.world_view_transform.numpy())
             camera_list.append(tmp_cam)
         
         # ref: regnerf/internal/datasets.py
         # here we are precalculating the values needed when generating random poses
-        positions = poses[:, :3, 3]
+        positions = np.array(poses)[:, :3, 3]
         radii = np.percentile(np.abs(positions), 100, 0)
         radii = np.concatenate([radii, [1.]])
         cam2world = poses_avg(poses)
