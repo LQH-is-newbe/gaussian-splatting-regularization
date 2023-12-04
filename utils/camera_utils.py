@@ -103,11 +103,12 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
             tmp_cam = loadCam(args, id, c, resolution_scale)
             height = tmp_cam.image_height
             width = tmp_cam.image_width
-            poses.append(tmp_cam.world_view_transform.numpy())
+            poses.append(tmp_cam.world_view_transform.cpu().numpy())
             camera_list.append(tmp_cam)
         
         # ref: regnerf/internal/datasets.py
         # here we are precalculating the values needed when generating random poses
+        poses = np.array(poses)
         positions = np.array(poses)[:, :3, 3]
         radii = np.percentile(np.abs(positions), 100, 0)
         radii = np.concatenate([radii, [1.]])
@@ -134,8 +135,8 @@ def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, de
         position = cam2world @ t
         z_axis_i = z_axis + np.random.randn(*z_axis.shape) * 0.125
         # generate R (here homogeneous representation not sure)
-        r = viewmatrix(z_axis_i, up, position, True)[:3, :3].transpose() / position[3]
-        t = position[:3] / position[3]
+        r = viewmatrix(z_axis_i, up, position, True)[:3, :3].transpose()
+        t = position[:3]
 
         # get focus
         f = np.linalg.norm(position - z_axis_i)
