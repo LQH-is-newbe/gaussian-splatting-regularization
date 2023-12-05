@@ -95,7 +95,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         if RegOn:
             unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
-            e_depths = unobserved_render_pkg["e_depths"]
+            e_depths, max_depth = unobserved_render_pkg["e_depths"], unobserved_render_pkg["max_depth"]
 
         # Loss
         # usual loss in 3d gs
@@ -104,7 +104,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         if RegOn:
             # geometry regulation: depth smoothness loss
-            L_dp = geometry_loss(e_depths)
+            L_dp = geometry_loss(e_depths, max_depth)
             # final loss
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + opt.lambda_ds * L_dp
         else:

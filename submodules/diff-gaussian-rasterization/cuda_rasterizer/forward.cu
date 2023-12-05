@@ -289,7 +289,7 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
 	float* __restrict__ out_e_depth,
-	float max_depth)
+	float* __restrict__ max_depth)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -404,7 +404,7 @@ renderCUDA(
 		}
 		else
 		{
-			out_e_depth[pix_id] = e_depth + T * max_depth;
+			out_e_depth[pix_id] = e_depth + T * *max_depth;
 		}
 	}
 }
@@ -424,7 +424,7 @@ void FORWARD::render(
 	const float* bg_color,
 	float* out_color,
 	float* out_e_depth,
-	float max_depth)
+	float* max_depth)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		random_camera,

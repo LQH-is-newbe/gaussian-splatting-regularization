@@ -79,7 +79,9 @@ RasterizeGaussiansCUDA(
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
 
-  float max_depth = 0;
+  float* max_depth;
+  cudaMalloc(&max_depth, sizeof(float));
+  cudaMemset(max_depth, 0, sizeof(float));
   
   int rendered = 0;
   if(P != 0)
@@ -114,11 +116,15 @@ RasterizeGaussiansCUDA(
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_e_depths.contiguous().data<float>(),
-		&max_depth,
+		max_depth,
 		radii.contiguous().data<int>(),
 		debug);
   }
-  return std::make_tuple(rendered, out_color, out_e_depths, radii, geomBuffer, binningBuffer, imgBuffer, max_depth);
+
+  float max_depth_result = 0;
+  cudaMemcpy(&max_depth_result, max_depth, sizeof(float), cudaMemcpyDeviceToHost);
+  cudaFree(max_depth);
+  return std::make_tuple(rendered, out_color, out_e_depths, radii, geomBuffer, binningBuffer, imgBuffer, max_depth_result);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

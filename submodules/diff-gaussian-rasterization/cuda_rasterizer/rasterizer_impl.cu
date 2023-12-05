@@ -339,7 +339,7 @@ int CudaRasterizer::Rasterizer::forward(
 		background,
 		out_color,
 		out_e_depths,
-		*max_depth), debug)
+		max_depth), debug)
 
 	return num_rendered;
 }

@@ -62,5 +62,11 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
-def geometry_loss(e_depths):
-    return torch.sum((F.pad(e_depths, (0, 1)) - F.pad(e_depths, (1, 0))) ** 2) + torch.sum((F.pad(e_depths, (0, 0, 0, 1)) - F.pad(e_depths, (0, 0, 1, 0))) ** 2)
+def geometry_loss(e_depths, max_depth):
+    m = torch.nn.ReLU()
+    d1 = torch.abs(F.pad(e_depths, (0, 1)) - F.pad(e_depths, (1, 0)))
+    d2 = torch.abs(F.pad(e_depths, (0, 0, 0, 1)) - F.pad(e_depths, (0, 0, 1, 0)))
+    return _geometry_loss_1_direction(d1, max_depth) + _geometry_loss_1_direction(d2, max_depth)
+
+def _geometry_loss_1_direction(d, max_depth):
+    return torch.sum(torch.where(d < max_depth/5, d, 0) ** 2)

@@ -98,10 +98,10 @@ class _RasterizeGaussians(torch.autograd.Function):
         ctx.num_rendered = num_rendered
         ctx.max_depth = max_depth
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
-        return color, e_depths, radii
+        return color, e_depths, radii, max_depth
 
     @staticmethod
-    def backward(ctx, grad_out_color, grad_out_e_depths, _):
+    def backward(ctx, grad_out_color, grad_out_e_depths, _, __):
 
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
