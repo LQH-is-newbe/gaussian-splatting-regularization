@@ -69,4 +69,5 @@ def geometry_loss(e_depths, max_depth):
     return _geometry_loss_1_direction(d1, max_depth) + _geometry_loss_1_direction(d2, max_depth)
 
 def _geometry_loss_1_direction(d, max_depth):
-    return torch.sum(torch.where(d < max_depth/5, d, 0) ** 2)
+    # return torch.sum(torch.where(d < max_depth/2, d, 0) ** 2)
+    return torch.sum(d ** 2)
