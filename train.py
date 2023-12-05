@@ -17,6 +17,7 @@ from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
+import torchvision
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -96,6 +97,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if RegOn:
             unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
             e_depths, max_depth = unobserved_render_pkg["e_depths"], unobserved_render_pkg["max_depth"]
+            if iteration % 1000 == 0:
+                torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
 
         # Loss
         # usual loss in 3d gs
