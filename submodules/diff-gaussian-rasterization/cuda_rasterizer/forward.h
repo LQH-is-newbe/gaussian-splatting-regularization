@@ -41,6 +41,7 @@ namespace FORWARD
 		int* radii,
 		float2* points_xy_image,
 		float* depths,
+		float* max_depth,
 		float* cov3Ds,
 		float* colors,
 		float4* conic_opacity,
@@ -63,7 +64,8 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
-		float* out_e_depth);
+		float* out_e_depth,
+		float max_depth);
 }
 
 

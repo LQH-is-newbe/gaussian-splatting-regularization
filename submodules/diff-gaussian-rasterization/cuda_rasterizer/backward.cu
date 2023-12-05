@@ -428,7 +428,8 @@ renderCUDA(
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-	float* __restrict__ dL_ddepths)
+	float* __restrict__ dL_ddepths,
+	float max_depth)
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
@@ -451,6 +452,7 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
+	__shared__ float collected_depths[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -465,7 +467,7 @@ renderCUDA(
 	float accum_rec[C] = { 0 };
 	float accum_rec_depth = 0;
 	float dL_dpixel[C];
-	float dL_de_depth = dL_de_depths[pix_id];
+	float dL_de_depth = inside ? dL_de_depths[pix_id] : 0;
 	if (inside)
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
@@ -494,6 +496,7 @@ renderCUDA(
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			for (int i = 0; i < C; i++)
 				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
+			collected_depths[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
 
@@ -548,7 +551,7 @@ renderCUDA(
 			else
 			{
 				// Propagate gradients to per-Gaussian depth and keep gradients w.r.t. alpha
-				const float depth = depths[j];
+				const float depth = collected_depths[j];
 				accum_rec_depth = last_alpha * last_depth + (1.f - last_alpha) * accum_rec_depth;
 				last_depth = depth;
 				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
@@ -572,7 +575,7 @@ renderCUDA(
 			}
 			else
 			{
-				dL_dalpha += (-T_final / (1.f - alpha)) * 200.0 * dL_de_depth;
+				dL_dalpha += (-T_final / (1.f - alpha)) * max_depth * dL_de_depth;
 			}
 
 
@@ -687,7 +690,8 @@ void BACKWARD::render(
 	float4* dL_dconic2D,
 	float* dL_dopacity,
 	float* dL_dcolors,
-	float* dL_ddepths)
+	float* dL_ddepths,
+	float max_depth)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
 		random_camera,
@@ -707,6 +711,7 @@ void BACKWARD::render(
 		dL_dconic2D,
 		dL_dopacity,
 		dL_dcolors,
-		dL_ddepths
+		dL_ddepths,
+		max_depth
 		);
 }

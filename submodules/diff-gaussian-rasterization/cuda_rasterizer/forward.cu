@@ -151,6 +151,18 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 	cov3D[5] = Sigma[2][2];
 }
 
+__device__ static float atomicMax(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fmaxf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
@@ -173,6 +185,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	int* radii,
 	float2* points_xy_image,
 	float* depths,
+	float* max_depth,
 	float* cov3Ds,
 	float* rgb,
 	float4* conic_opacity,
@@ -249,6 +262,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
+	atomicMax(max_depth, p_view.z);
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
@@ -274,7 +288,8 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_e_depth)
+	float* __restrict__ out_e_depth,
+	float max_depth)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -389,7 +404,7 @@ renderCUDA(
 		}
 		else
 		{
-			out_e_depth[pix_id] = e_depth + T * 200.0;
+			out_e_depth[pix_id] = e_depth + T * max_depth;
 		}
 	}
 }
@@ -408,7 +423,8 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_e_depth)
+	float* out_e_depth,
+	float max_depth)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		random_camera,
@@ -423,7 +439,8 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
-		out_e_depth);
+		out_e_depth,
+		max_depth);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -446,6 +463,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	int* radii,
 	float2* means2D,
 	float* depths,
+	float* max_depth,
 	float* cov3Ds,
 	float* rgb,
 	float4* conic_opacity,
@@ -474,6 +492,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		radii,
 		means2D,
 		depths,
+		max_depth,
 		cov3Ds,
 		rgb,
 		conic_opacity,
