@@ -109,12 +109,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        print(psnr(image, gt_image).mean().double())
+        # print(psnr(image, gt_image).mean().double())
         if georeg:
             # geometry regulation: depth smoothness loss
             L_dp = geometry_loss(e_depths, max_depth)
             # final loss
-            loss = ((1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))) * 0.5 + opt.lambda_ds * L_dp
+            loss = ((1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))) * 1 + opt.lambda_ds * L_dp
         else:
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
@@ -140,10 +140,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, 0.5 if georeg else 1)
+                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)#, 0.5 if georeg else 1)
                 if georeg:
                     gaussians.max_radii2D[u_visibility_filter] = torch.max(gaussians.max_radii2D[u_visibility_filter], u_radii[u_visibility_filter])
-                    gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
+                #     gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None

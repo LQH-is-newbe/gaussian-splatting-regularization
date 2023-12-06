@@ -317,6 +317,7 @@ renderCUDA(
 
 	// Initialize helper variables
 	float T = 1.0f;
+	float T_sum = 0.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
@@ -382,6 +383,7 @@ renderCUDA(
 				e_depth += depths[collected_id[j]] * alpha * T;
 			}
 
+			T_sum += T;
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -404,14 +406,16 @@ renderCUDA(
 		}
 		else
 		{	
-			if (T == 1.0f) 
-			{
-				out_e_depth[pix_id] = 0.0;
-			}
-			else
-			{
-				out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
-			}
+			// if (T == 1.0f) 
+			// {
+			// 	out_e_depth[pix_id] = 0.0;
+			// }
+			// else
+			// {
+			// 	out_e_depth[pix_id] = e_depth / T_sum;
+			// }
+			out_e_depth[pix_id] = e_depth;
+			//out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
 		}
 	}
 }

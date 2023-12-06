@@ -458,6 +458,7 @@ renderCUDA(
 	// product of all (1 - alpha) factors. 
 	const float T_final = inside ? final_Ts[pix_id] : 0;
 	float T = T_final;
+	float T_sum = 0.0f;
 
 	// We start from the back. The ID of the last contributing
 	// Gaussian is known from each pixel from the forward.
@@ -523,6 +524,7 @@ renderCUDA(
 				continue;
 
 			T = T / (1.f - alpha);
+			T_sum += T;
 			const float dchannel_dcolor = alpha * T;
 
 			float dL_dalpha = 0.0f;
@@ -575,7 +577,12 @@ renderCUDA(
 			}
 			// else
 			// {
-			// 	dL_dalpha += (-T_final / (1.f - alpha)) * max_depth * dL_de_depth;
+			// 	// dL_dalpha += (-T_final / (1.f - alpha)) * max_depth * dL_de_depth;
+			// 	if (T_final != 1.0) 
+			// 	{
+			// 		// dL_dalpha /= (1-T_final);
+			// 		dL_dalpha /= T_sum;
+			// 	}
 			// }
 
 
