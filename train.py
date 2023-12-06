@@ -93,7 +93,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         # image, viewspace_point_tensor, visibility_filter, radii, e_depths, max_depth = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["e_depths"], render_pkg["max_depth"] 
-
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
@@ -112,7 +111,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # geometry regulation: depth smoothness loss
             L_dp = geometry_loss(e_depths, max_depth)
             # final loss
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + opt.lambda_ds * L_dp
+            loss = ((1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))) * 0.5 + opt.lambda_ds * L_dp
         else:
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
