@@ -67,7 +67,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 network_gui.conn = None
 
         iter_start.record()
-        georeg = RegOn and iteration > 3000
+        georeg = RegOn and iteration > -1
 
         gaussians.update_learning_rate(iteration)
 
@@ -109,7 +109,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        if georeg and iteration > 3000:
+        print(psnr(image, gt_image).mean().double())
+        if georeg:
             # geometry regulation: depth smoothness loss
             L_dp = geometry_loss(e_depths, max_depth)
             # final loss
@@ -243,7 +244,7 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    RegOn = False
+    RegOn = True
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)

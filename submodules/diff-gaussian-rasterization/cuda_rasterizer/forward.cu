@@ -403,8 +403,15 @@ renderCUDA(
 				out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		}
 		else
-		{
-			out_e_depth[pix_id] = e_depth + T * *max_depth;
+		{	
+			if (T == 1.0f) 
+			{
+				out_e_depth[pix_id] = 0.0;
+			}
+			else
+			{
+				out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
+			}
 		}
 	}
 }

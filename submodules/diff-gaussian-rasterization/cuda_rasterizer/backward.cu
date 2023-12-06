@@ -573,10 +573,10 @@ renderCUDA(
 					bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 				dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 			}
-			else
-			{
-				dL_dalpha += (-T_final / (1.f - alpha)) * max_depth * dL_de_depth;
-			}
+			// else
+			// {
+			// 	dL_dalpha += (-T_final / (1.f - alpha)) * max_depth * dL_de_depth;
+			// }
 
 
 			// Helpful reusable temporary variables
