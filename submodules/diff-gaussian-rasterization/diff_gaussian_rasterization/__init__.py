@@ -98,6 +98,9 @@ class _RasterizeGaussians(torch.autograd.Function):
         ctx.num_rendered = num_rendered
         ctx.max_depth = max_depth
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
+        # if raster_settings.random_camera:
+        #     print(e_depths.max())
+        #     print(max_depth)
         return color, e_depths, radii, max_depth
 
     @staticmethod

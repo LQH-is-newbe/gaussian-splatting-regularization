@@ -91,14 +91,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
+        # render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+        # image, viewspace_point_tensor, visibility_filter, radii, e_depths, max_depth = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["e_depths"], render_pkg["max_depth"] 
+
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         if RegOn:
             unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
             e_depths, max_depth = unobserved_render_pkg["e_depths"], unobserved_render_pkg["max_depth"]
-            if iteration % 1000 == 0:
-                torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
+            # if iteration % 1000 == 0:
+            #     torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
 
         # Loss
         # usual loss in 3d gs

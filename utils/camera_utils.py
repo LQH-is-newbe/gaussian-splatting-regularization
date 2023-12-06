@@ -93,7 +93,10 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
             tmp_cam = loadCam(args, id, c, resolution_scale)
             height = tmp_cam.image_height
             width = tmp_cam.image_width
-            poses.append(tmp_cam.world_view_transform.cpu().numpy())
+            fovX = tmp_cam.FoVx
+            fovY = tmp_cam.FoVy
+            poses.append(np.linalg.inv(tmp_cam.world_view_transform.cpu().numpy()).transpose())
+            # poses.append(tmp_cam.world_view_transform.cpu().numpy())
             camera_list.append(tmp_cam)
 
         # ids = np.random.choice(len(cam_infos), size=9, replace=False)
@@ -109,13 +112,13 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
         # ref: regnerf/internal/datasets.py
         # here we are precalculating the values needed when generating random poses
         poses = np.array(poses)
-        positions = np.array(poses)[:, :3, 3]
+        positions = poses[:, :3, 3]
         radii = np.percentile(np.abs(positions), 100, 0)
         radii = np.concatenate([radii, [1.]])
         cam2world = poses_avg(poses)
         up = poses[:, :3, 1].mean(0)
         z_axis = focus_pt_fn(poses)
-        unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, height, width, args.data_device)
+        unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, height, width, fovX, fovY, args.data_device)
 
         return camera_list, unobserved_list
     else:
@@ -126,7 +129,7 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTr
 
         return camera_list, []
 
-def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, device):
+def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, fovX, fovY, device):
     cams = []
 
     for _ in range(n_random_cams):
@@ -135,17 +138,18 @@ def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, de
         position = cam2world @ t
         z_axis_i = z_axis + np.random.randn(*z_axis.shape) * 0.125
         # generate R (here homogeneous representation not sure)
-        r = viewmatrix(z_axis_i, up, position, True)[:3, :3].transpose()
-        t = position[:3]
+        pose = viewmatrix(z_axis_i, up, position, True)
+        vm = np.linalg.inv(np.vstack([pose, np.array([[0,0,0,1]])]))
+        r = vm[:3, :3].transpose()
 
-        # get focus
-        f = np.linalg.norm(position - z_axis_i)
-        # generate FovX
-        fovX = focal2fov(f, width)
-        # generate FovY
-        fovY = focal2fov(f, height)
+        # # get focus
+        # f = np.linalg.norm(position - z_axis_i)
+        # # generate FovX
+        # fovX = focal2fov(f, width)
+        # # generate FovY
+        # fovY = focal2fov(f, height)
         # two ids set to None and image_name set to empty for generated unobserved camera views
-        cams.append(Camera(colmap_id=None, R=r, T=t, 
+        cams.append(Camera(colmap_id=None, R=r, T=position, 
                             FoVx=fovX, FoVy=fovY, 
                             image=None, gt_alpha_mask=None,
                             image_name='', uid=None, 
