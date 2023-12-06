@@ -67,6 +67,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 network_gui.conn = None
 
         iter_start.record()
+        georeg = RegOn and iteration > 3000
 
         gaussians.update_learning_rate(iteration)
 
@@ -79,7 +80,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
-        if RegOn:
+        if georeg:
             # Pick a random unobserved view
             if not unobserved_stack:
                 unobserved_stack = scene.getRandomCameras().copy()
@@ -95,10 +96,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # image, viewspace_point_tensor, visibility_filter, radii, e_depths, max_depth = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["e_depths"], render_pkg["max_depth"] 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        torch.cuda.empty_cache()
 
-        if RegOn:
-            unobserved_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
-            e_depths, max_depth = unobserved_render_pkg["e_depths"], unobserved_render_pkg["max_depth"]
+        if georeg:
+            u_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
+            e_depths, max_depth, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"], u_render_pkg["max_depth"], u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
             # if iteration % 1000 == 0:
             #     torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
 
@@ -107,7 +109,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        if RegOn:
+        if georeg and iteration > 3000:
             # geometry regulation: depth smoothness loss
             L_dp = geometry_loss(e_depths, max_depth)
             # final loss
@@ -137,7 +139,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, 0.5 if georeg else 1)
+                if georeg:
+                    gaussians.max_radii2D[u_visibility_filter] = torch.max(gaussians.max_radii2D[u_visibility_filter], u_radii[u_visibility_filter])
+                    gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
@@ -238,7 +243,7 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    RegOn = True
+    RegOn = False
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)
