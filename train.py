@@ -99,8 +99,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if georeg:
             u_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
             e_depths, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"],  u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
-            # if iteration % 1000 == 0:
-            #     torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
 
         # Loss
         # usual loss in 3d gs
@@ -242,7 +240,7 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    RegOn = False
+    RegOn = True
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)

@@ -29,8 +29,6 @@ class Camera(nn.Module):
         self.FoVy = FoVy
         self.image_name = image_name
         self.random_camera = isUnobserved
-        print(FoVx)
-        print(FoVy)
 
         try:
             self.data_device = torch.device(data_device)

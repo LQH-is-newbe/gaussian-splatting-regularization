@@ -39,7 +39,7 @@ namespace BACKWARD
 		float4* dL_dconic2D,
 		float* dL_dopacity,
 		float* dL_dcolors,
-		float* dL_ddepths,
+		float3* dL_ddepths,
 		float max_depth);
 
 	void preprocess(
@@ -66,7 +66,7 @@ namespace BACKWARD
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
 		glm::vec4* dL_drot,
-		float* dL_ddepths);
+		float3* dL_ddepths);
 }
 
 #endif

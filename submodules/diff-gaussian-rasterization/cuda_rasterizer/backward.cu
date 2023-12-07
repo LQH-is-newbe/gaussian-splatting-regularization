@@ -364,7 +364,7 @@ __global__ void preprocessCUDA(
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot,
-	float* dL_ddepths)
+	float3* dL_ddepths)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
@@ -388,10 +388,10 @@ __global__ void preprocessCUDA(
 	if (random_camera)
 	{
 		// Compute loss gradient w.r.t. 3D means due to gradients of depth
-		float dL_ddepth = dL_ddepths[idx];
-		dL_dmean.x += view[2] * dL_ddepth;
-		dL_dmean.y += view[6] * dL_ddepth;
-		dL_dmean.z += view[10] * dL_ddepth;
+		float3 dL_ddepth = dL_ddepths[idx];
+		dL_dmean.x += view[0] * dL_ddepth.x + view[1] * dL_ddepth.y + view[2] * dL_ddepth.z;
+		dL_dmean.y += view[4] * dL_ddepth.x + view[5] * dL_ddepth.y + view[6] * dL_ddepth.z;
+		dL_dmean.z += view[8] * dL_ddepth.x + view[9] * dL_ddepth.y + view[10] * dL_ddepth.z;
 	}
 
 	// That's the second part of the mean gradient. Previous computation
@@ -428,8 +428,9 @@ renderCUDA(
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-	float* __restrict__ dL_ddepths,
-	float max_depth)
+	float3* __restrict__ dL_ddepths,
+	float max_depth
+	)
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
@@ -530,12 +531,12 @@ renderCUDA(
 			float dL_dalpha = 0.0f;
 			const int global_id = collected_id[j];
 
-			// float znear = 0.1
-			// float disperpixel = 0.65718496418 * znear * 2 / W
-			// float xdis = std::abs(pixf.x - W/2) * disperpixel
-			// float ydis = std::abs(pixf.y - H/2) * disperpixel
-			// float dep = (xdis**2 + ydis**2 + znear**2) ** 0.5
-			// float ratio = dep / znear
+			float znear = 0.1f;
+			float disperpixel = 0.65718496418f * znear * 2.0f / W;
+			float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
+			float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
+			float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
+			float ratio = dep / znear;
 
 			if (!random_camera)
 			{
@@ -563,12 +564,16 @@ renderCUDA(
 				const float depth = collected_depths[j];
 				accum_rec_depth = last_alpha * last_depth + (1.f - last_alpha) * accum_rec_depth;
 				last_depth = depth;
-				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
-				// dL_dalpha += (depth - accum_rec_depth) * dL_de_depth * ratio;
+				// dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
+				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth * ratio;
 
 				const float de_depth_ddepth = alpha * T;
-				atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth);
+				const float dL_ddepth = de_depth_ddepth * dL_de_depth;
+				// atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth);
 				// atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth * ratio);
+				atomicAdd(&dL_ddepths[global_id].x, dL_ddepth / znear * xdis);
+				atomicAdd(&dL_ddepths[global_id].y, dL_ddepth / znear * ydis);
+				atomicAdd(&dL_ddepths[global_id].z, dL_ddepth);
 			}
 
 			dL_dalpha *= T;
@@ -641,7 +646,7 @@ void BACKWARD::preprocess(
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot,
-	float* dL_ddepths)
+	float3* dL_ddepths)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -706,7 +711,7 @@ void BACKWARD::render(
 	float4* dL_dconic2D,
 	float* dL_dopacity,
 	float* dL_dcolors,
-	float* dL_ddepths,
+	float3* dL_ddepths,
 	float max_depth)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(

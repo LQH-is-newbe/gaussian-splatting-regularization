@@ -420,7 +420,7 @@ void CudaRasterizer::Rasterizer::backward(
 		(float4*)dL_dconic,
 		dL_dopacity,
 		dL_dcolor,
-		dL_ddepths,
+		(float3*)dL_ddepths,
 		max_depth), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
@@ -450,5 +450,5 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot,
-		dL_ddepths), debug)
+		(float3*)dL_ddepths), debug)
 }

@@ -414,16 +414,16 @@ renderCUDA(
 			// {
 			// 	out_e_depth[pix_id] = e_depth / T_sum;
 			// }
-			
-			// float znear = 0.1
-			// float disperpixel = 0.65718496418 * znear * 2 / W
-			// float xdis = std::abs(pixf.x - W/2) * disperpixel
-			// float ydis = std::abs(pixf.y - H/2) * disperpixel
-			// float dep = (xdis**2 + ydis**2 + znear**2) ** 0.5
-			// float ratio = dep / znear
 
-			// out_e_depth[pix_id] = e_depth * ratio;
-			out_e_depth[pix_id] = e_depth;
+			float znear = 0.1f;
+			float disperpixel = 0.65718496418f * znear * 2.0f / W;
+			float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
+			float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
+			float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
+			float ratio = dep / znear;
+
+			out_e_depth[pix_id] = e_depth * ratio;
+			// out_e_depth[pix_id] = e_depth;
 			//out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
 		}
 	}
