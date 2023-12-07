@@ -92,15 +92,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        # render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
-        # image, viewspace_point_tensor, visibility_filter, radii, e_depths, max_depth = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["e_depths"], render_pkg["max_depth"] 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         torch.cuda.empty_cache()
 
         if georeg:
             u_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
-            e_depths, max_depth, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"], u_render_pkg["max_depth"], u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
+            e_depths, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"],  u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
             # if iteration % 1000 == 0:
             #     torchvision.utils.save_image(e_depths / e_depths.max(), os.path.join(iteration + ".png"))
 
@@ -109,10 +107,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
 
-        # print(psnr(image, gt_image).mean().double())
         if georeg:
             # geometry regulation: depth smoothness loss
-            L_dp = geometry_loss(e_depths, max_depth)
+            L_dp = geometry_loss(e_depths)
             # final loss
             loss = ((1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))) * 1 + opt.lambda_ds * L_dp
         else:
@@ -140,16 +137,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)#, 0.5 if georeg else 1)
+                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, 0.5 if georeg else 1)
                 if georeg:
                     gaussians.max_radii2D[u_visibility_filter] = torch.max(gaussians.max_radii2D[u_visibility_filter], u_radii[u_visibility_filter])
-                #     gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
+                    gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+                    print(psnr(image, gt_image).mean().double())
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                 
-                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
+                if not georeg and (iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter)):
                     gaussians.reset_opacity()
 
             # Optimizer step
@@ -244,7 +242,7 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    RegOn = True
+    RegOn = False
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)

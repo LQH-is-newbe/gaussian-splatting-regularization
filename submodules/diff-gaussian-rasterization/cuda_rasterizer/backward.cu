@@ -530,6 +530,13 @@ renderCUDA(
 			float dL_dalpha = 0.0f;
 			const int global_id = collected_id[j];
 
+			// float znear = 0.1
+			// float disperpixel = 0.65718496418 * znear * 2 / W
+			// float xdis = std::abs(pixf.x - W/2) * disperpixel
+			// float ydis = std::abs(pixf.y - H/2) * disperpixel
+			// float dep = (xdis**2 + ydis**2 + znear**2) ** 0.5
+			// float ratio = dep / znear
+
 			if (!random_camera)
 			{
 				// Propagate gradients to per-Gaussian colors and keep
@@ -557,9 +564,11 @@ renderCUDA(
 				accum_rec_depth = last_alpha * last_depth + (1.f - last_alpha) * accum_rec_depth;
 				last_depth = depth;
 				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
+				// dL_dalpha += (depth - accum_rec_depth) * dL_de_depth * ratio;
 
 				const float de_depth_ddepth = alpha * T;
 				atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth);
+				// atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth * ratio);
 			}
 
 			dL_dalpha *= T;
