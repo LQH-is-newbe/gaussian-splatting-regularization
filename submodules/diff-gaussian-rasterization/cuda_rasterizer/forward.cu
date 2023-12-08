@@ -416,7 +416,8 @@ renderCUDA(
 			// }
 
 			float znear = 0.1f;
-			float disperpixel = 0.65718496418f * znear * 2.0f / W;
+			//0.65718496418f room
+			float disperpixel = 0.60034640471f * znear * 2.0f / W;
 			float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
 			float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
 			float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);

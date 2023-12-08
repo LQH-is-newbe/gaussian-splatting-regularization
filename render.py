@@ -28,14 +28,16 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
+    makedirs(depth_path, exist_ok=True)
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        render_pkg = render(view, gaussians, pipeline, background)
-        rendering, e_depths, max_depth = render_pkg["render"], render_pkg["e_depths"], render_pkg["max_depth"]
+        rendering = render(view, gaussians, pipeline, background)["render"]
+        view.random_camera = True
+        e_depths = render(view, gaussians, pipeline, background)["e_depths"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(e_depths / max_depth, os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(e_depths / torch.max(e_depths), os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"))
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool):
     with torch.no_grad():

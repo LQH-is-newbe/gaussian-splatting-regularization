@@ -532,7 +532,7 @@ renderCUDA(
 			const int global_id = collected_id[j];
 
 			float znear = 0.1f;
-			float disperpixel = 0.65718496418f * znear * 2.0f / W;
+			float disperpixel = 0.60034640471f * znear * 2.0f / W;
 			float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
 			float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
 			float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
@@ -565,7 +565,7 @@ renderCUDA(
 				accum_rec_depth = last_alpha * last_depth + (1.f - last_alpha) * accum_rec_depth;
 				last_depth = depth;
 				// dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
-				dL_dalpha += (depth - accum_rec_depth) * dL_de_depth * ratio;
+				dL_dalpha += (depth - accum_rec_depth) * ratio * dL_de_depth;
 
 				const float de_depth_ddepth = alpha * T;
 				const float dL_ddepth = de_depth_ddepth * dL_de_depth;
