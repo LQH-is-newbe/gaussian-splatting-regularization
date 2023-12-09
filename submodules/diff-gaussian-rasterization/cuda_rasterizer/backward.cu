@@ -567,12 +567,13 @@ renderCUDA(
 				// dL_dalpha += (depth - accum_rec_depth) * dL_de_depth;
 				dL_dalpha += (depth - accum_rec_depth) * ratio * dL_de_depth;
 
-				const float de_depth_ddepth = alpha * T;
+				const float de_depth_ddepth = alpha * T * ratio;
 				const float dL_ddepth = de_depth_ddepth * dL_de_depth;
 				// atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth);
 				// atomicAdd(&(dL_ddepths[global_id]), de_depth_ddepth * dL_de_depth * ratio);
-				atomicAdd(&dL_ddepths[global_id].x, dL_ddepth / znear * xdis);
-				atomicAdd(&dL_ddepths[global_id].y, dL_ddepth / znear * ydis);
+
+				// atomicAdd(&dL_ddepths[global_id].x, dL_ddepth / znear * xdis);
+				// atomicAdd(&dL_ddepths[global_id].y, dL_ddepth / znear * ydis);
 				atomicAdd(&dL_ddepths[global_id].z, dL_ddepth);
 			}
 
