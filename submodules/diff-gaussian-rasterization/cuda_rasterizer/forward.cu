@@ -71,7 +71,7 @@ __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const 
 }
 
 // Forward version of 2D covariance matrix computation
-__device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, const float* cov3D, const float* viewmatrix)
+__device__ glm::mat3 computeCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, const float* cov3D, const float* viewmatrix, float* dep)
 {
 	// The following models the steps outlined by equations 29
 	// and 31 in "EWA Splatting" (Zwicker et al., 2002). 
@@ -86,10 +86,12 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 	t.x = min(limx, max(-limx, txtz)) * t.z;
 	t.y = min(limy, max(-limy, tytz)) * t.z;
 
+	float l = powf(t.x*t.x + t.y*t.y + t.z*t.z, 0.5);
+	*dep = l;
 	glm::mat3 J = glm::mat3(
 		focal_x / t.z, 0.0f, -(focal_x * t.x) / (t.z * t.z),
 		0.0f, focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
-		0, 0, 0);
+		t.x/l, t.y/l, t.z/l);
 
 	glm::mat3 W = glm::mat3(
 		viewmatrix[0], viewmatrix[4], viewmatrix[8],
@@ -109,7 +111,8 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 	// one pixel wide/high. Discard 3rd row and column.
 	cov[0][0] += 0.3f;
 	cov[1][1] += 0.3f;
-	return { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
+	return cov;
+	// return { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
 }
 
 // Forward method for converting scale and rotation properties of each
@@ -191,6 +194,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	float2* dep_mat,
+	float* deps,
 	bool prefiltered)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -227,20 +232,20 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Compute 2D screen-space covariance matrix
-	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
+	glm::mat3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix, &(deps[idx]));
 
 	// Invert covariance (EWA algorithm)
-	float det = (cov.x * cov.z - cov.y * cov.y);
+	float det = (cov[0][0] * cov[1][1] - cov[0][1] * cov[0][1]);
 	if (det == 0.0f)
 		return;
 	float det_inv = 1.f / det;
-	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
+	float3 conic = { cov[1][1] * det_inv, -cov[0][1] * det_inv, cov[0][0] * det_inv };
 
 	// Compute extent in screen space (by finding eigenvalues of
 	// 2D covariance matrix). Use extent to compute a bounding rectangle
 	// of screen-space tiles that this Gaussian overlaps with. Quit if
 	// rectangle covers 0 tiles. 
-	float mid = 0.5f * (cov.x + cov.z);
+	float mid = 0.5f * (cov[0][0] + cov[1][1]);
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
 	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
@@ -249,6 +254,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
+
+	dep_mat[idx] = { cov[2][0] * conic.x + cov[2][1] * conic.y, cov[2][0] * conic.y + cov[2][1] * conic.z };
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
@@ -284,7 +291,10 @@ renderCUDA(
 	const float* __restrict__ features,
 	const float* __restrict__ depths,
 	const float4* __restrict__ conic_opacity,
+	const float2* __restrict__ dep_mat,
+	const float* __restrict__ deps,
 	float* __restrict__ final_T,
+	float* __restrict__ alpha_T_sum,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
@@ -317,7 +327,7 @@ renderCUDA(
 
 	// Initialize helper variables
 	float T = 1.0f;
-	float T_sum = 0.0f;
+	float _alpha_T_sum = 0.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
@@ -357,6 +367,10 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
+			// calculate expected depth of this gaussian respect to this pixel location
+			float2 dep_mat_j = dep_mat[collected_id[j]];
+			float edep = deps[collected_id[j]] - (dep_mat_j.x * d.x + dep_mat_j.y * d.y);
+
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
@@ -380,10 +394,11 @@ renderCUDA(
 			else
 			{
 				// Calculate expected depth
-				e_depth += depths[collected_id[j]] * alpha * T;
+				// e_depth += depths[collected_id[j]] * alpha * T;
+				e_depth += edep * alpha * T;
 			}
 
-			T_sum += T;
+			_alpha_T_sum += T * alpha;
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -404,28 +419,40 @@ renderCUDA(
 			for (int ch = 0; ch < CHANNELS; ch++)
 				out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		}
+		// else
+		// {	
+		// 	// if (T == 1.0f) 
+		// 	// {
+		// 	// 	out_e_depth[pix_id] = 0.0;
+		// 	// }
+		// 	// else
+		// 	// {
+		// 	// 	out_e_depth[pix_id] = e_depth / T_sum;
+		// 	// }
+
+		// 	float znear = 0.1f;
+		// 	//0.65718496418f room
+		// 	float disperpixel = 0.60034640471f * znear * 2.0f / W;
+		// 	float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
+		// 	float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
+		// 	float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
+		// 	float ratio = dep / znear;
+
+		// 	out_e_depth[pix_id] = e_depth * ratio;
+		// 	// out_e_depth[pix_id] = e_depth;
+		// 	//out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
+		// }
+		// else
+		// {
+		// 	if (_alpha_T_sum != 0.0) 
+		// 	{
+		// 		out_e_depth[pix_id] = e_depth / _alpha_T_sum;
+		// 	}
+		// 	alpha_T_sum[pix_id] = _alpha_T_sum;
+		// }
 		else
-		{	
-			// if (T == 1.0f) 
-			// {
-			// 	out_e_depth[pix_id] = 0.0;
-			// }
-			// else
-			// {
-			// 	out_e_depth[pix_id] = e_depth / T_sum;
-			// }
-
-			float znear = 0.1f;
-			//0.65718496418f room
-			float disperpixel = 0.60034640471f * znear * 2.0f / W;
-			float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
-			float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
-			float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
-			float ratio = dep / znear;
-
-			out_e_depth[pix_id] = e_depth * ratio;
-			// out_e_depth[pix_id] = e_depth;
-			//out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
+		{
+			out_e_depth[pix_id] = e_depth;
 		}
 	}
 }
@@ -440,7 +467,10 @@ void FORWARD::render(
 	const float* colors,
 	const float* depths,
 	const float4* conic_opacity,
+	const float2* dep_mat,
+	const float* deps,
 	float* final_T,
+	float* alpha_T_sum,
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
@@ -456,7 +486,10 @@ void FORWARD::render(
 		colors,
 		depths,
 		conic_opacity,
+		dep_mat,
+		deps,
 		final_T,
+		alpha_T_sum,
 		n_contrib,
 		bg_color,
 		out_color,
@@ -490,6 +523,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	float2* dep_mat,
+	float* deps,
 	bool prefiltered)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
@@ -519,6 +554,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
+		dep_mat,
+		deps,
 		prefiltered
 		);
 }

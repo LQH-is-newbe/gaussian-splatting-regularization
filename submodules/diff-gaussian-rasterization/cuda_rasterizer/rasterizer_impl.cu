@@ -166,6 +166,8 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
 	obtain(chunk, geom.point_offsets, P, 128);
+	obtain(chunk, geom.dep_mat, P, 128);
+	obtain(chunk, geom.deps, P, 128);
 	return geom;
 }
 
@@ -175,6 +177,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	obtain(chunk, img.accum_alpha, N, 128);
 	obtain(chunk, img.n_contrib, N, 128);
 	obtain(chunk, img.ranges, N, 128);
+	obtain(chunk, img.alpha_T_sum, N, 128);
 	return img;
 }
 
@@ -274,6 +277,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
+		geomState.dep_mat,
+		geomState.deps,
 		prefiltered
 	), debug)
 
@@ -334,7 +339,10 @@ int CudaRasterizer::Rasterizer::forward(
 		feature_ptr,
 		geomState.depths,
 		geomState.conic_opacity,
+		geomState.dep_mat,
+		geomState.deps,
 		imgState.accum_alpha,
+		imgState.alpha_T_sum,
 		imgState.n_contrib,
 		background,
 		out_color,
@@ -378,6 +386,8 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dscale,
 	float* dL_drot,
 	float* dL_ddepths,
+	float* dL_ddep_mat,
+	float* dL_ddeps,
 	float max_depth,
 	bool debug)
 {
@@ -413,6 +423,7 @@ void CudaRasterizer::Rasterizer::backward(
 		color_ptr,
 		geomState.depths,
 		imgState.accum_alpha,
+		imgState.alpha_T_sum,
 		imgState.n_contrib,
 		dL_dpix,
 		dL_de_depths,
@@ -421,6 +432,10 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dopacity,
 		dL_dcolor,
 		(float3*)dL_ddepths,
+		geomState.dep_mat,
+		geomState.deps,
+		(float2*) dL_ddep_mat,
+		dL_ddeps,
 		max_depth), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
@@ -450,5 +465,8 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot,
-		(float3*)dL_ddepths), debug)
+		(float3*)dL_ddepths,
+		(float2*) dL_ddep_mat,
+		dL_ddeps
+		), debug)
 }

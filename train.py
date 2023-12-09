@@ -23,6 +23,7 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from os import makedirs
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -50,6 +51,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    # makedirs("depth", exist_ok=True)
     for iteration in range(first_iter, opt.iterations + 1):   
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -97,22 +99,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         torch.cuda.empty_cache()
 
         if georeg:
-            u_render_pkg = render(unobserved_camera, gaussians, pipe, bg)
+            u_render_pkg = render(unobserved_camera, gaussians, pipe, bg, render_depth=True)
             e_depths, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"],  u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
             torch.cuda.empty_cache()
+            # print(e_depths.mean())
+            # if (iteration > 2000):
+            #     torchvision.utils.save_image(e_depths / torch.max(e_depths), os.path.join("depth", str(iteration) + ".png"))
 
         # Loss
         # usual loss in 3d gs
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
-
+        image_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        L_dp = 0
         if georeg:
             # geometry regulation: depth smoothness loss
             L_dp = geometry_loss(e_depths)
             # final loss
-            loss = ((1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))) * 1 + opt.lambda_ds * L_dp
+            loss = image_loss * 1 + opt.lambda_ds * L_dp
         else:
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            loss = image_loss
         loss.backward()
 
         iter_end.record()
@@ -123,15 +129,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
                 progress_bar.update(10)
-            if iteration == opt.iterations or progress_bar.format_dict['elapsed'] > 244:
+            if iteration == opt.iterations or progress_bar.format_dict['elapsed'] > 10000:
                 progress_bar.close()
-                training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+                # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
                 break
 
-            # # Log and save
-            # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            # Log and save
+            training_report(tb_writer, iteration, georeg, Ll1, image_loss, L_dp, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             # if (iteration in saving_iterations):
             #     print("\n[ITER {}] Saving Gaussians".format(iteration))
             #     scene.save(iteration)
@@ -140,14 +146,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, 0.5 if georeg else 1)
+                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
                 if georeg:
                     gaussians.max_radii2D[u_visibility_filter] = torch.max(gaussians.max_radii2D[u_visibility_filter], u_radii[u_visibility_filter])
-                    gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0.5)
+                    # gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     print(psnr(image, gt_image).mean().double())
-                    size_threshold = 20 if (not georeg and iteration > opt.opacity_reset_interval) or (georeg and iteration > opt.reg_prune_large_start) else None
+                    # size_threshold = 20 if (not georeg and iteration > opt.opacity_reset_interval) or (georeg and iteration > opt.reg_prune_large_start) else None
+                    size_threshold = None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                 
                 if not georeg and (iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter)):
@@ -184,15 +191,17 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, georeg, Ll1, image_loss, L_dp, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
+        tb_writer.add_scalar('train_loss_patches/image_loss', image_loss.item(), iteration)
+        if georeg:
+            tb_writer.add_scalar('train_loss_patches/geometry_loss', L_dp.item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
 
     # Report test and samples of training set
-    # if iteration in testing_iterations:
-    if True:
+    if iteration in testing_iterations:
+    # if True:
         torch.cuda.empty_cache()
         validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
@@ -201,22 +210,29 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
                 psnr_test = 0.0
+                geometry_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                    e_depths = renderFunc(viewpoint, scene.gaussians, *renderArgs, render_depth=True)["e_depths"]
+                    depth_image = e_depths / torch.max(e_depths)
+                    depth_image = depth_image.repeat(3, 1, 1)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     if tb_writer and (idx < 5):
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
-                        # if iteration == testing_iterations[0]:
-                        #     tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
-                        tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                        tb_writer.add_images(config['name'] + "_view_{}/edepth".format(viewpoint.image_name), depth_image[None], global_step=iteration)
+                        if iteration == testing_iterations[0]:
+                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
+                    geometry_test += geometry_loss(e_depths)
                 psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])          
+                l1_test /= len(config['cameras'])       
+                geometry_test /= len(config['cameras'])    
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
+                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - geometry_loss', geometry_test, iteration)
 
         if tb_writer:
             tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
@@ -238,6 +254,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--geo_reg", type=bool, default = False)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -247,10 +264,9 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    RegOn = True
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, RegOn)
-
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.geo_reg)
+    # range(0, args.iterations, 100)
     # All done
     print("\nTraining complete.")

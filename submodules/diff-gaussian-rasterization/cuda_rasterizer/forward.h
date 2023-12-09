@@ -47,6 +47,8 @@ namespace FORWARD
 		float4* conic_opacity,
 		const dim3 grid,
 		uint32_t* tiles_touched,
+		float2* dep_mat,
+		float* deps,
 		bool prefiltered);
 
 	// Main rasterization method.
@@ -60,7 +62,10 @@ namespace FORWARD
 		const float* features,
 		const float* depths,
 		const float4* conic_opacity,
+		const float2* dep_mat,
+		const float* deps,
 		float* final_T,
+		float* alpha_T_sum,
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,

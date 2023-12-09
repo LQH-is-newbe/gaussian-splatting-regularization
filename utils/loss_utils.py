@@ -69,4 +69,4 @@ def geometry_loss(e_depths):
     return _geometry_loss_1_direction(d1, d2) + _geometry_loss_1_direction(d1, d3)
 
 def _geometry_loss_1_direction(d1, d2):
-    return torch.sum(torch.where((d1 != 0.0)&(d2 != 0.0), d1-d2, 0) ** 2)
+    return torch.mean(torch.where((d1 != 0.0)&(d2 != 0.0), d1-d2, 0) ** 2)

@@ -87,6 +87,8 @@ namespace CudaRasterizer
 			float* dL_dscale,
 			float* dL_drot,
 			float* dL_ddepths,
+			float* dL_ddep_mat,
+			float* dL_ddeps,
 			float max_depth,
 			bool debug);
 	};
