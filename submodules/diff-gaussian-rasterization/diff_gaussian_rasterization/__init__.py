@@ -110,11 +110,6 @@ class _RasterizeGaussians(torch.autograd.Function):
         raster_settings = ctx.raster_settings
         max_depth = ctx.max_depth
         colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
-        # if raster_settings.random_camera:
-        #     print(grad_out_e_depths.max())
-        # else:
-        #     print(grad_out_color.max())
-
 
         # Restructure args as C++ method expects them
         args = (raster_settings.random_camera,
@@ -153,16 +148,6 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raise ex
         else:
              grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)
-        
-        # print(raster_settings.random_camera)
-        # print(grad_out_color.mean())
-        # print(grad_out_e_depths.mean())
-        # print(grad_means2D.mean())
-        # print(grad_opacities.mean())
-        # print(torch.abs(grad_opacities).max())
-        # print(grad_means3D.mean())
-        # print(grad_scales.mean())
-        # print(grad_rotations.mean())
 
         grads = (
             grad_means3D,

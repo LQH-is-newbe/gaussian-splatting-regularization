@@ -327,7 +327,6 @@ renderCUDA(
 
 	// Initialize helper variables
 	float T = 1.0f;
-	float _alpha_T_sum = 0.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
@@ -394,11 +393,9 @@ renderCUDA(
 			else
 			{
 				// Calculate expected depth
-				// e_depth += depths[collected_id[j]] * alpha * T;
 				e_depth += edep * alpha * T;
 			}
 
-			_alpha_T_sum += T * alpha;
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -419,37 +416,6 @@ renderCUDA(
 			for (int ch = 0; ch < CHANNELS; ch++)
 				out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		}
-		// else
-		// {	
-		// 	// if (T == 1.0f) 
-		// 	// {
-		// 	// 	out_e_depth[pix_id] = 0.0;
-		// 	// }
-		// 	// else
-		// 	// {
-		// 	// 	out_e_depth[pix_id] = e_depth / T_sum;
-		// 	// }
-
-		// 	float znear = 0.1f;
-		// 	//0.65718496418f room
-		// 	float disperpixel = 0.60034640471f * znear * 2.0f / W;
-		// 	float xdis = fabsf(pixf.x - W/2.0f) * disperpixel;
-		// 	float ydis = fabsf(pixf.y - H/2.0f) * disperpixel;
-		// 	float dep = powf((powf(xdis,2.0f) + powf(ydis,2.0f) + powf(znear,2.0f)),0.5f);
-		// 	float ratio = dep / znear;
-
-		// 	out_e_depth[pix_id] = e_depth * ratio;
-		// 	// out_e_depth[pix_id] = e_depth;
-		// 	//out_e_depth[pix_id] = e_depth / (1-T);// + T * *max_depth;
-		// }
-		// else
-		// {
-		// 	if (_alpha_T_sum != 0.0) 
-		// 	{
-		// 		out_e_depth[pix_id] = e_depth / _alpha_T_sum;
-		// 	}
-		// 	alpha_T_sum[pix_id] = _alpha_T_sum;
-		// }
 		else
 		{
 			out_e_depth[pix_id] = e_depth;

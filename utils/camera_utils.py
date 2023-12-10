@@ -84,50 +84,33 @@ def focus_pt_fn(poses):
   return focus_pt
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args, unobserved, isTrain=True):
+    camera_list = []
+    poses = []
+    width, height = 0, 0
+
+    for id, c in enumerate(cam_infos):
+        tmp_cam = loadCam(args, id, c, resolution_scale)
+        height = tmp_cam.image_height
+        width = tmp_cam.image_width
+        fovX = tmp_cam.FoVx
+        fovY = tmp_cam.FoVy
+        poses.append(np.linalg.inv(tmp_cam.world_view_transform.cpu().numpy()).transpose())
+        camera_list.append(tmp_cam)
+    
+    # ref: regnerf/internal/datasets.py
+    # here we are precalculating the values needed when generating random poses
+    poses = np.array(poses)
+    positions = poses[:, :3, 3]
+    z_axis = focus_pt_fn(poses)
+    scale = np.max(np.linalg.norm(positions - z_axis, axis=0, keepdims=True))
+    unobserved_list = []
     if isTrain and unobserved:
-        camera_list = []
-        poses = []
-        width, height = 0, 0
-
-        for id, c in enumerate(cam_infos):
-            tmp_cam = loadCam(args, id, c, resolution_scale)
-            height = tmp_cam.image_height
-            width = tmp_cam.image_width
-            fovX = tmp_cam.FoVx
-            fovY = tmp_cam.FoVy
-            poses.append(np.linalg.inv(tmp_cam.world_view_transform.cpu().numpy()).transpose())
-            # poses.append(tmp_cam.world_view_transform.cpu().numpy())
-            camera_list.append(tmp_cam)
-
-        # ids = np.random.choice(len(cam_infos), size=9, replace=False)
-
-        # for id in ids:
-        #     c = cam_infos[id]
-        #     tmp_cam = loadCam(args, id, c, resolution_scale)
-        #     height = tmp_cam.image_height
-        #     width = tmp_cam.image_width
-        #     poses.append(tmp_cam.world_view_transform.cpu().numpy())
-        #     camera_list.append(tmp_cam)
-        
-        # ref: regnerf/internal/datasets.py
-        # here we are precalculating the values needed when generating random poses
-        poses = np.array(poses)
-        positions = poses[:, :3, 3]
+        up = poses[:, :3, 1].mean(0)
         radii = np.percentile(np.abs(positions), 100, 0)
         radii = np.concatenate([radii, [1.]])
         cam2world = poses_avg(poses)
-        up = poses[:, :3, 1].mean(0)
-        z_axis = focus_pt_fn(poses)
         unobserved_list = generate_cams(args.n_random_cams, radii, cam2world, up, z_axis, height, width, fovX, fovY, args.data_device)
-
-        return camera_list, unobserved_list
-    else:
-        camera_list = []
-        
-        for id, c in enumerate(cam_infos):
-            camera_list.append(loadCam(args, id, c, resolution_scale))
-
-        return camera_list, []
+    return camera_list, unobserved_list, scale
 
 def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, fovX, fovY, device):
     cams = []
@@ -142,12 +125,6 @@ def generate_cams(n_random_cams, radii, cam2world, up, z_axis, height, width, fo
         vm = np.linalg.inv(np.vstack([pose, np.array([[0,0,0,1]])]))
         r = vm[:3, :3].transpose()
 
-        # # get focus
-        # f = np.linalg.norm(position - z_axis_i)
-        # # generate FovX
-        # fovX = focal2fov(f, width)
-        # # generate FovY
-        # fovY = focal2fov(f, height)
         # two ids set to None and image_name set to empty for generated unobserved camera views
         cams.append(Camera(colmap_id=None, R=r, T=position, 
                             FoVx=fovX, FoVy=fovY, 

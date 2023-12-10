@@ -403,12 +403,6 @@ class GaussianModel:
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
         self.prune_points(prune_mask)
         pruned = self.get_xyz.shape[0] - mid
-        print("total num")
-        print(self.get_xyz.shape[0])
-        print("pruned num")
-        print(pruned)
-        print("added num")
-        print(added)
         torch.cuda.empty_cache()
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter, denom_acc=1):

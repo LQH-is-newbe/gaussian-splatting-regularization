@@ -51,7 +51,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
-    # makedirs("depth", exist_ok=True)
+    # makedirs("random", exist_ok=True)
     for iteration in range(first_iter, opt.iterations + 1):   
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -102,9 +102,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             u_render_pkg = render(unobserved_camera, gaussians, pipe, bg, render_depth=True)
             e_depths, u_viewspace_point_tensor, u_visibility_filter, u_radii = u_render_pkg["e_depths"],  u_render_pkg["viewspace_points"], u_render_pkg["visibility_filter"], u_render_pkg["radii"]
             torch.cuda.empty_cache()
-            # print(e_depths.mean())
-            # if (iteration > 2000):
-            #     torchvision.utils.save_image(e_depths / torch.max(e_depths), os.path.join("depth", str(iteration) + ".png"))
 
         # Loss
         # usual loss in 3d gs
@@ -129,18 +126,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
                 progress_bar.update(10)
-            if iteration == opt.iterations or progress_bar.format_dict['elapsed'] > 10000:
+            if iteration == opt.iterations:
                 progress_bar.close()
-                # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
-                break
 
             # Log and save
             training_report(tb_writer, iteration, georeg, Ll1, image_loss, L_dp, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            # if (iteration in saving_iterations):
-            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
-            #     scene.save(iteration)
+            if (iteration in saving_iterations):
+                print("\n[ITER {}] Saving Gaussians".format(iteration))
+                scene.save(iteration)
 
             # Densification
             if iteration < opt.densify_until_iter:
@@ -149,15 +142,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
                 if georeg:
                     gaussians.max_radii2D[u_visibility_filter] = torch.max(gaussians.max_radii2D[u_visibility_filter], u_radii[u_visibility_filter])
-                    # gaussians.add_densification_stats(u_viewspace_point_tensor, u_visibility_filter, denom_acc=0)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    print(psnr(image, gt_image).mean().double())
-                    # size_threshold = 20 if (not georeg and iteration > opt.opacity_reset_interval) or (georeg and iteration > opt.reg_prune_large_start) else None
-                    size_threshold = None
+                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                 
-                if not georeg and (iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter)):
+                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
             # Optimizer step
@@ -267,6 +257,5 @@ if __name__ == "__main__":
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.geo_reg)
-    # range(0, args.iterations, 100)
     # All done
     print("\nTraining complete.")
